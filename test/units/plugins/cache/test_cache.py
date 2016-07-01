@@ -42,6 +42,13 @@ except ImportError:
 else:
     from ansible.plugins.cache.redis import CacheModule as RedisCache
 
+HAVE_POSTGRESQL = True
+try:
+    import psycopg2
+except ImportError:
+    HAVE_POSTGRESQL = False
+else:
+    from ansible.plugins.cache.postgresql import CacheModule as PostgresqlCache
 
 class TestFactCache(unittest.TestCase):
 
@@ -113,3 +120,7 @@ class TestAbstractClass(unittest.TestCase):
     @unittest.skipUnless(HAVE_REDIS, 'Redis python module not installed')
     def test_redis_cachemodule(self):
         self.assertIsInstance(RedisCache(), RedisCache)
+
+    @unittest.skipUnless(HAVE_POSTGRESQL, 'PostgreSQL python module (psycopg) not installed')
+    def test_postgresql_cachemodule(self):
+        self.assertIsInstance(PostgresqlCache(), PostgresqlCache)
