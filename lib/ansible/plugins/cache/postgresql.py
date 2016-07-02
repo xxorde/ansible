@@ -50,10 +50,9 @@ class CacheModule(BaseCacheModule):
             # Set default parameters instead
             connection = "dbname='ansible' user='ansible' hostaddr='127.0.0.1'"
 
-        self._timeout = float(C.CACHE_PLUGIN_TIMEOUT)
 
         try:
-            self._conn = psycopg2.connect(connection)
+            self._conn = psycopg2.connect(connection+" application_name='ansible_fact_cache'")
         except:
             raise AnsibleError("""Unable to connect to PostgreSQL database!
 Set connection string or use .pgpass file. Example conifguration line:
@@ -61,8 +60,10 @@ fact_caching_connection = "hostaddr='127.0.0.1' dbname='ansible' user='ansible' 
 
         # Set table name hard
         self._table = "ansible_fact_cache"
-        cur = self._conn.cursor()
+        self._timeout = float(C.CACHE_PLUGIN_TIMEOUT)
+
         # check if the table is present
+        cur = self._conn.cursor()
         cur.execute("SELECT TRUE FROM information_schema.tables WHERE table_name=%s;", (self._table,))
         self._conn.commit()
         if not bool(cur.rowcount):
