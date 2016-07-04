@@ -53,6 +53,7 @@ class CacheModule(BaseCacheModule):
 
         try:
             self._conn = psycopg2.connect(connection+" application_name='ansible_fact_cache'")
+            self._conn.set_session(autocommit=True)
         except:
             raise AnsibleError("""Unable to connect to PostgreSQL database!
 Set connection string or use .pgpass file. Example conifguration line:
@@ -65,7 +66,6 @@ fact_caching_connection = "hostaddr='127.0.0.1' dbname='ansible' user='ansible' 
         # check if the table is present
         cur = self._conn.cursor()
         cur.execute("SELECT TRUE FROM information_schema.tables WHERE table_name=%s;", (self._table,))
-        self._conn.commit()
         if not bool(cur.rowcount):
             error = """Table \""""+self._table+"""\" does not exists. You can create it with:
 CREATE TABLE \""""+self._table+"""\" (
@@ -85,7 +85,6 @@ facts JSONB NOT NULL);
 	cur.execute( ("DELETE FROM ansible_fact_cache "
                       "WHERE timeout != 0 "
                       "AND (changed + interval '1 second' * timeout) < NOW();"))
-        self._conn.commit()
         rowcount = cur.rowcount;
         return rowcount
 
@@ -93,7 +92,6 @@ facts JSONB NOT NULL);
         query = "SELECT facts FROM \""+self._table+"\" WHERE host = %s;"
         cur = self._conn.cursor()
         cur.execute(query, (key,))
-        self._conn.commit()
         value = cur.fetchone()
         if value[0] is None:
             raise KeyError
@@ -109,7 +107,6 @@ facts JSONB NOT NULL);
         params = (key, self._timeout, jvalue, jvalue, self._timeout)
         cur = self._conn.cursor()
         cur.execute(query, params)
-        self._conn.commit()
         return True
 
     def keys(self):
@@ -117,7 +114,6 @@ facts JSONB NOT NULL);
         query = "SELECT host FROM \""+self._table+"\";"
         cur = self._conn.cursor()
         cur.execute(query, (key,))
-        self._conn.commit()
         for row in cur:
             keys += row
         return keys
@@ -125,7 +121,6 @@ facts JSONB NOT NULL);
     def contains(self, key):
         cur = self._conn.cursor()
         cur.execute("SELECT TRUE FROM \""+self._table+"\" WHERE host = %s;", (key,))
-        self._conn.commit()
         value = cur.fetchone()
         if value is None:
             return False 
@@ -134,7 +129,6 @@ facts JSONB NOT NULL);
     def delete(self, key):
         cur = self._conn.cursor()
         cur.execute("DELETE FROM \""+self._table+"\" WHERE host = %s;", (key,))
-        self._conn.commit()
         rowcount = cur.rowcount;
         if cur <= 0:
             return False
@@ -144,7 +138,6 @@ facts JSONB NOT NULL);
         cur = self._conn.cursor()
         # delete all rows
         cur.execute("DELETE FROM \""+self._table+"\";")
-        self._conn.commit()
         return True
 
     def copy(self):
@@ -152,7 +145,6 @@ facts JSONB NOT NULL);
         query = "SELECT host, facts FROM \""+self._table+"\";"
         cur = self._conn.cursor()
         cur.execute(query, (key,))
-        self._conn.commit()
         for row in cur:
             clone += row
         return clone
