@@ -89,6 +89,7 @@ class CacheModule(BaseCacheModule):
         except:
             raise AnsibleError("Unable to delete old facts from PostgreSQL database")
 
+        cur.close()
         self._pool.putconn(conn)
 
 
@@ -99,6 +100,7 @@ class CacheModule(BaseCacheModule):
         cur = conn.cursor()
         cur.execute(query, (key,))
         value = cur.fetchone()
+        cur.close()
         self._pool.putconn(conn)
         if value[0] is None:
             raise KeyError
@@ -116,6 +118,7 @@ class CacheModule(BaseCacheModule):
         conn.set_session(autocommit=True)
         cur = conn.cursor()
         cur.execute(query, params)
+        cur.close()
         self._pool.putconn(conn)
         return True
 
@@ -126,9 +129,10 @@ class CacheModule(BaseCacheModule):
         conn.set_session(autocommit=True)
         cur = conn.cursor()
         cur.execute(query, (key,))
-        self._pool.putconn(conn)
         for row in cur:
             keys += row
+        cur.close()
+        self._pool.putconn(conn)
         return keys
 
     def contains(self, key):
@@ -137,6 +141,7 @@ class CacheModule(BaseCacheModule):
         cur = conn.cursor()
         cur.execute("SELECT TRUE FROM \""+self._table+"\" WHERE host = %s;", (key,))
         value = cur.fetchone()
+        cur.close()
         self._pool.putconn(conn)
         if value is None:
             return False 
@@ -148,6 +153,7 @@ class CacheModule(BaseCacheModule):
         cur = conn.cursor()
         cur.execute("DELETE FROM \""+self._table+"\" WHERE host = %s;", (key,))
         rowcount = cur.rowcount;
+        cur.close()
         self._pool.putconn(conn)
         if rowcount <= 0:
             return False
@@ -159,6 +165,7 @@ class CacheModule(BaseCacheModule):
         cur = conn.cursor()
         # delete all rows
         cur.execute("DELETE FROM \""+self._table+"\";")
+        cur.close()
         self._pool.putconn(conn)
         return True
 
@@ -169,7 +176,8 @@ class CacheModule(BaseCacheModule):
         conn.set_session(autocommit=True)
         cur = conn.cursor()
         cur.execute(query, (key,))
-        self._pool.putconn(conn)
         for row in cur:
             clone += row
+        cur.close()
+        self._pool.putconn(conn)
         return clone
