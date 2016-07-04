@@ -33,6 +33,7 @@ from ansible.plugins.cache.base import BaseCacheModule
 
 try:
     import psycopg2
+    from psycopg2.pool import ThreadedConnectionPool
 except ImportError:
     raise AnsibleError("The 'psycopg2' python module is required for the PostgreSQL fact cache, 'pip install psycopg2'")
 
@@ -51,48 +52,54 @@ class CacheModule(BaseCacheModule):
             connection = "dbname='ansible' user='ansible' hostaddr='127.0.0.1'"
 
 
+        connection += " application_name='ansible_fact_cache'"
+	minconnections = 1
+        maxconnections = 2
+
         try:
-            self._conn = psycopg2.connect(connection+" application_name='ansible_fact_cache'")
-            self._conn.set_session(autocommit=True)
+            self._pool = ThreadedConnectionPool(minconnections, maxconnections, connection)
         except:
-            raise AnsibleError("""Unable to connect to PostgreSQL database!
-Set connection string or use .pgpass file. Example conifguration line:
-fact_caching_connection = "hostaddr='127.0.0.1' dbname='ansible' user='ansible' password='mypassword'" """)
+            raise AnsibleError("Unable to connect to PostgreSQL database!"
+                               "Set connection string or use .pgpass file. Example conifguration line:"
+                               "fact_caching_connection = \"hostaddr='127.0.0.1' dbname='ansible' user='ansible' password='mypassword'\"")
 
         # Set table name hard
         self._table = "ansible_fact_cache"
         self._timeout = float(C.CACHE_PLUGIN_TIMEOUT)
 
         # check if the table is present
-        cur = self._conn.cursor()
+        conn = self._pool.getconn()
+        conn.set_session(autocommit=True)
+        cur = conn.cursor()
         cur.execute("SELECT TRUE FROM information_schema.tables WHERE table_name=%s;", (self._table,))
         if not bool(cur.rowcount):
-            error = """Table \""""+self._table+"""\" does not exists. You can create it with:
-CREATE TABLE \""""+self._table+"""\" (
-host VARCHAR PRIMARY KEY,
-changed  TIMESTAMP NOT NULL DEFAULT NOW(),
-timeout BIGINT DEFAULT 0,
-facts JSONB NOT NULL);
-            """
-            raise AnsibleError(error)
+            raise AnsibleError("Table \""+self._table+"\" does not exists. You can create it with:"
+                               "CREATE TABLE \""+self._table+"\" ("
+                               "host VARCHAR PRIMARY KEY,"
+                               "changed  TIMESTAMP NOT NULL DEFAULT NOW(),"
+                               "timeout BIGINT DEFAULT 0,"
+                               "facts JSONB NOT NULL);")
+
         # remove all keys that expired at the beginning
         # keys are not removed if they expire during long running task
-        self._expire_keys()
+        try:
+            cur.execute("DELETE FROM ansible_fact_cache "
+                        "WHERE timeout != 0 "
+                        "AND (changed + interval '1 second' * timeout) < NOW();")
+        except:
+            raise AnsibleError("Unable to delete old facts from PostgreSQL database")
 
-    def _expire_keys(self):
-        # delete all keys that are older than timeout
-        cur = self._conn.cursor()
-	cur.execute( ("DELETE FROM ansible_fact_cache "
-                      "WHERE timeout != 0 "
-                      "AND (changed + interval '1 second' * timeout) < NOW();"))
-        rowcount = cur.rowcount;
-        return rowcount
+        self._pool.putconn(conn)
+
 
     def get(self, key):
         query = "SELECT facts FROM \""+self._table+"\" WHERE host = %s;"
-        cur = self._conn.cursor()
+        conn = self._pool.getconn()
+        conn.set_session(autocommit=True)
+        cur = conn.cursor()
         cur.execute(query, (key,))
         value = cur.fetchone()
+        self._pool.putconn(conn)
         if value[0] is None:
             raise KeyError
         return value[0]
@@ -105,46 +112,64 @@ facts JSONB NOT NULL);
                  "VALUES (%s, NOW(), %s, %s) "
                  "ON CONFLICT (host) DO UPDATE SET facts = %s, changed = NOW(), timeout = %s;")
         params = (key, self._timeout, jvalue, jvalue, self._timeout)
-        cur = self._conn.cursor()
+        conn = self._pool.getconn()
+        conn.set_session(autocommit=True)
+        cur = conn.cursor()
         cur.execute(query, params)
+        self._pool.putconn(conn)
         return True
 
     def keys(self):
         keys = dict()
         query = "SELECT host FROM \""+self._table+"\";"
-        cur = self._conn.cursor()
+        conn = self._pool.getconn()
+        conn.set_session(autocommit=True)
+        cur = conn.cursor()
         cur.execute(query, (key,))
+        self._pool.putconn(conn)
         for row in cur:
             keys += row
         return keys
 
     def contains(self, key):
-        cur = self._conn.cursor()
+        conn = self._pool.getconn()
+        conn.set_session(autocommit=True)
+        cur = conn.cursor()
         cur.execute("SELECT TRUE FROM \""+self._table+"\" WHERE host = %s;", (key,))
         value = cur.fetchone()
+        self._pool.putconn(conn)
         if value is None:
             return False 
         return True 
 
     def delete(self, key):
-        cur = self._conn.cursor()
+        conn = self._pool.getconn()
+        conn.set_session(autocommit=True)
+        cur = conn.cursor()
         cur.execute("DELETE FROM \""+self._table+"\" WHERE host = %s;", (key,))
         rowcount = cur.rowcount;
-        if cur <= 0:
+        self._pool.putconn(conn)
+        if rowcount <= 0:
             return False
         return True
 
     def flush(self):
-        cur = self._conn.cursor()
+        conn = self._pool.getconn()
+        conn.set_session(autocommit=True)
+        cur = conn.cursor()
         # delete all rows
         cur.execute("DELETE FROM \""+self._table+"\";")
+        self._pool.putconn(conn)
         return True
 
     def copy(self):
         clone = dict()
         query = "SELECT host, facts FROM \""+self._table+"\";"
-        cur = self._conn.cursor()
+        conn = self._pool.getconn()
+        conn.set_session(autocommit=True)
+        cur = conn.cursor()
         cur.execute(query, (key,))
+        self._pool.putconn(conn)
         for row in cur:
             clone += row
         return clone
